@@ -36,13 +36,13 @@ except ImportError:  # pragma: no cover - optional dependency
     RedisSaver = None  # type: ignore[assignment]
 
 from pydantic import BaseModel, ValidationError
-from data_science_ai_agent_mcp import (
+from .data_science_ai_agent_mcp import (
     DEFAULT_TIME_MCP,
     MCPConfig,
     load_mcp_config,
     load_mcp_tools,
 )
-from data_science_ai_agent_tools import (
+from .data_science_ai_agent_tools import (
     MAX_QUERIES_PER_WINDOW,
     QUERY_WINDOW_SECONDS,
     RuntimeContext,
@@ -50,18 +50,29 @@ from data_science_ai_agent_tools import (
 )
 
 
-PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[3]
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+# Load .env file - this file is mandatory
+from dotenv import load_dotenv
+env_path = PROJECT_ROOT / ".env"
+if not env_path.exists():
+    raise FileNotFoundError(
+        f"The .env file is mandatory but was not found at {env_path}. "
+        f"Please create a .env file in the project root directory. "
+        f"You can copy example.env to .env as a starting point."
+    )
+load_dotenv(env_path)
+
 try:
-    from env_utils import doublecheck_env
+    from .env_utils import doublecheck_env
 except ImportError:  # pragma: no cover - optional outside primary project root
     doublecheck_env = None  # type: ignore[assignment]
 
 
 CHINOOK_URL = "https://storage.googleapis.com/benchmarks-artifacts/chinook/Chinook.db"
-DEFAULT_DB_PATH = pathlib.Path(__file__).resolve().parents[1] / "Chinook.db"
+DEFAULT_DB_PATH = pathlib.Path(__file__).resolve().parents[2] / "Chinook.db"
 DEFAULT_MODEL = "openai:gpt-3.5-turbo"
 
 
