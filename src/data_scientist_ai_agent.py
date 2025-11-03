@@ -150,19 +150,8 @@ STRUCTURED_PROMPTS = {
     )
 }
 
-PERSONA_SNIPPETS = {
-    "default": "",
-    "friendly": "\n- Maintain a warm, welcoming tone while staying professional.",
-    "executive": "\n- Provide concise, executive-ready answers with key takeaways.",
-    "analytical": "\n- Include brief analytical commentary explaining your reasoning steps.",
-}
-
-PERSONA_SUFFIXES = {
-    "default": None,
-    "friendly": "Respond in locale {locale} with a friendly, encouraging tone.",
-    "executive": "Respond in locale {locale} with concise, executive-ready phrasing.",
-    "analytical": "Respond in locale {locale} and briefly summarize your analytical reasoning.",
-}
+DEFAULT_TONE_PROMPT = "\n- Provide concise answers with clear takeaways."
+DEFAULT_RESPONSE_SUFFIX = "Respond in locale {locale} with concise, decision-ready phrasing."
 
 AGG_FUNCTION_MARKERS = ("max(", "min(", "count(", "sum(", "avg(", "distinct ")
 
@@ -209,7 +198,6 @@ def build_system_prompt(
     mcp_summary: Optional[str] = None,
     structured_instructions: Optional[str] = None,
     *,
-    persona: str = "default",
     locale: str = "en-US",
 ) -> str:
     schema = db.get_table_info()
@@ -219,11 +207,11 @@ def build_system_prompt(
         if structured_instructions
         else ""
     )
-    persona_lines = PERSONA_SNIPPETS.get(persona, "")
-    locale_lines = f"\n- Respond in locale {locale}."
+    tone_lines = DEFAULT_TONE_PROMPT
+    locale_lines = f"\n- Respond in locale {locale} with concise, decision-ready phrasing."
 
     return f"""You are a careful SQLite analyst.
-{persona_lines}{locale_lines}
+{tone_lines}{locale_lines}
 
 Authoritative schema (do not invent columns/tables):
 {schema}
@@ -252,7 +240,6 @@ def build_agent_and_context(
     mcp_tools: Optional[list[Any]] = None,
     checkpointer: Optional[Any] = None,
     structured_instructions: Optional[str] = None,
-    persona: str = "default",
     locale: str = "en-US",
     hitl_enabled: bool = False,
 ) -> tuple[Any, RuntimeContext]:
@@ -288,7 +275,6 @@ def build_agent_and_context(
             max_rows,
             mcp_tool_names,
             structured_instructions,
-            persona=persona,
             locale=locale,
         ),
         context_schema=RuntimeContext,
@@ -340,7 +326,6 @@ def run_cli(
     disable_stream: bool = False,
     structured_model: Optional[Type[BaseModel]] = None,
     structured_suffix: Optional[str] = None,
-    persona: str = "default",
     locale: str = "en-US",
     hitl_enabled: bool = False,
     hitl_auto_approve: bool = False,
@@ -379,7 +364,6 @@ def run_cli(
             extracted = extract_customer_identity(user_input)
             if extracted is not None:
                 active_customer = extracted
-            persona_suffix = PERSONA_SUFFIXES.get(persona)
             content = user_input
             if structured_suffix:
                 content = f"{user_input}\n\n{structured_suffix}"
@@ -404,8 +388,8 @@ def run_cli(
                         f"{content}\n\nIf the request does not specify a first and last name, ask the user to "
                         "identify the customer before querying."
                     )
-            if persona_suffix and structured_model is None:
-                content = f"{content}\n\n{persona_suffix.format(locale=locale)}"
+            if structured_model is None:
+                content = f"{content}\n\n{DEFAULT_RESPONSE_SUFFIX.format(locale=locale)}"
 
             user_message = HumanMessage(
                 content=content,
@@ -747,12 +731,6 @@ def parse_cli_args() -> argparse.Namespace:
         help="Model identifier passed to init_chat_model (default: %(default)s)",
     )
     parser.add_argument(
-        "--persona",
-        choices=["default", "friendly", "executive", "analytical"],
-        default="default",
-        help="Adjust the assistant's tone/personality.",
-    )
-    parser.add_argument(
         "--locale",
         default="en-US",
         help="Preferred locale/language code (e.g., en-US, fr-FR).",
@@ -963,7 +941,6 @@ if __name__ == "__main__":
         mcp_tools=mcp_tools,
         checkpointer=checkpointer,
         structured_instructions=structured_instructions,
-        persona=args.persona,
         locale=args.locale,
         hitl_enabled=args.hitl,
     )
@@ -978,7 +955,6 @@ if __name__ == "__main__":
         disable_stream=args.no_stream,
         structured_model=structured_model,
         structured_suffix=structured_suffix,
-        persona=args.persona,
         locale=args.locale,
         hitl_enabled=args.hitl,
         hitl_auto_approve=args.hitl_auto_approve,

@@ -6,7 +6,7 @@
 graph TD
     User --> CLI[CLI interface]
     CLI --> Agent{AI agent (LangGraph)}
-    Agent --> Prompt[System prompt & persona]
+    Agent --> Prompt[System prompt (concise tone)]
     Agent --> ToolSelect[Tool selection]
     ToolSelect --> SQLTools[SQL toolkit]
     ToolSelect --> MCPTools[MCP toolkit]
@@ -58,8 +58,8 @@ graph TD
 - HITL middleware pauses before execution for manual approval or automatic risk checks.
 - Access to `sqlite_master`, PRAGMA commands, and unrestricted `SELECT *` queries is blocked.
 
-### Personalization
-- Personas are defined through `PERSONA_SNIPPETS` and `PERSONA_SUFFIXES`.
+### Tone and personalization
+- A concise instruction block in the system prompt keeps answers focused on key takeaways.
 - Locale codes (for example `en-US`) flow into the system prompt to adjust language.
 - Customer identity tracking keeps per-thread context for personalization and filtering.
 
@@ -73,7 +73,7 @@ graph TD
 - Register additional Python tools and append them to the SQL toolkit.
 - Provide an MCP configuration file via `--mcp-config` to attach external services.
 - Implement custom middleware (logging, policy enforcement, analytics) and insert it into the LangGraph runtime.
-- Extend personas or structured outputs by adjusting dictionaries in `src/data_scientist_ai_agent.py`.
+- Extend structured outputs or adjust the default tone constants in `src/data_scientist_ai_agent.py`.
 
 ## Security Architecture
 

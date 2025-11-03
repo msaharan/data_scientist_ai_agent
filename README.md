@@ -9,6 +9,7 @@ A LangGraph-based SQL agent that provides conversational access to SQLite databa
 - Guardrails for read-only SQL execution, rate limiting, and optional approvals
 - Structured JSON output when schemas are registered
 - Tooling extensibility through Model Context Protocol (MCP) servers and custom Python tools
+- Executive-ready answers with concise takeaways by default
 
 ## Quick Start
 
@@ -17,7 +18,7 @@ python -m src.data_scientist_ai_agent
 ```
 
 - Use `./run.sh` or `uv run python -m src.data_scientist_ai_agent` if you prefer wrapper scripts.
-- See `USAGE.md` for additional launch options, persona settings, and flag descriptions.
+- See `USAGE.md` for additional launch options and flag descriptions.
 
 ### Example conversation
 
@@ -53,7 +54,7 @@ Detailed environment, notebook, and LangSmith instructions live in `USAGE.md`.
 ## Architecture & Extensibility
 
 - High-level system design and component descriptions are in `ARCHITECTURE.md`.
-- That document also covers safety controls, personalization, and how to register custom tools or MCP integrations.
+- That document also covers safety controls and how to register custom tools or MCP integrations.
 
 ## Security Highlights
 

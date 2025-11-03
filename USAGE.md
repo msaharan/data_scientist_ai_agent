@@ -11,7 +11,7 @@ Start with the setup snapshot in `README.md` to install dependencies and configu
 ./run.sh
 
 # Run with custom options
-./run.sh --model "openai:gpt-4" --persona friendly
+./run.sh --model "openai:gpt-4"
 ```
 
 ### Using uv (recommended if you have uv installed)
@@ -21,7 +21,7 @@ Start with the setup snapshot in `README.md` to install dependencies and configu
 uv run python -m src.data_scientist_ai_agent
 
 # Run with custom options
-uv run python -m src.data_scientist_ai_agent --model "openai:gpt-4" --persona friendly
+uv run python -m src.data_scientist_ai_agent --model "openai:gpt-4"
 ```
 
 ### Using Python directly
@@ -34,7 +34,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 python -m src.data_scientist_ai_agent
 
 # Or with custom options
-python -m src.data_scientist_ai_agent --model "openai:gpt-4" --persona friendly
+python -m src.data_scientist_ai_agent --model "openai:gpt-4"
 ```
 
 ## Command Line Options
@@ -46,9 +46,8 @@ python -m src.data_scientist_ai_agent --model "openai:gpt-4" --persona friendly
 - `--db-path PATH`: Path to Chinook SQLite database (default: `./Chinook.db`)
 - `--max-rows INT`: Maximum rows in SQL responses (default: `5`)
 
-### Persona and Localization
+### Localization
 
-- `--persona {default,friendly,executive,analytical}`: Adjust assistant's tone/personality
 - `--locale TEXT`: Preferred locale/language code (default: `en-US`)
 
 ### Human-in-the-Loop
@@ -87,9 +86,9 @@ python -m src.data_scientist_ai_agent --model "openai:gpt-4" --persona friendly
 # Then type: "Show me the top 5 artists by number of tracks"
 ```
 
-### With GPT-4 and friendly persona
+### With GPT-4
 ```bash
-./run.sh --model "openai:gpt-4" --persona friendly
+./run.sh --model "openai:gpt-4"
 ```
 
 ### With persistent SQLite memory
