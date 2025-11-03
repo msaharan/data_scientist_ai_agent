@@ -46,9 +46,9 @@ python -m src.data_scientist_ai_agent --model "openai:gpt-4"
 - `--db-path PATH`: Path to Chinook SQLite database (default: `./Chinook.db`)
 - `--max-rows INT`: Maximum rows in SQL responses (default: `5`)
 
-### Localization
+### Language
 
-- `--locale TEXT`: Preferred locale/language code (default: `en-US`)
+- Responses are always produced in English (US).
 
 ### Human-in-the-Loop
 

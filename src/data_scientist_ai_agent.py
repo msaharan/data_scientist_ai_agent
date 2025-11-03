@@ -151,7 +151,7 @@ STRUCTURED_PROMPTS = {
 }
 
 DEFAULT_TONE_PROMPT = "\n- Provide concise answers with clear takeaways."
-DEFAULT_RESPONSE_SUFFIX = "Respond in locale {locale} with concise, decision-ready phrasing."
+DEFAULT_RESPONSE_SUFFIX = "Respond in English (US) with concise, decision-ready phrasing."
 
 AGG_FUNCTION_MARKERS = ("max(", "min(", "count(", "sum(", "avg(", "distinct ")
 
@@ -197,8 +197,6 @@ def build_system_prompt(
     max_rows: int,
     mcp_summary: Optional[str] = None,
     structured_instructions: Optional[str] = None,
-    *,
-    locale: str = "en-US",
 ) -> str:
     schema = db.get_table_info()
     mcp_lines = f"\n- MCP tools available: {mcp_summary}" if mcp_summary else ""
@@ -208,7 +206,7 @@ def build_system_prompt(
         else ""
     )
     tone_lines = DEFAULT_TONE_PROMPT
-    locale_lines = f"\n- Respond in locale {locale} with concise, decision-ready phrasing."
+    locale_lines = "\n- Respond in English (US) with concise, decision-ready phrasing."
 
     return f"""You are a careful SQLite analyst.
 {tone_lines}{locale_lines}
@@ -240,7 +238,6 @@ def build_agent_and_context(
     mcp_tools: Optional[list[Any]] = None,
     checkpointer: Optional[Any] = None,
     structured_instructions: Optional[str] = None,
-    locale: str = "en-US",
     hitl_enabled: bool = False,
 ) -> tuple[Any, RuntimeContext]:
     """Construct the SQL agent alongside its runtime context."""
@@ -275,7 +272,6 @@ def build_agent_and_context(
             max_rows,
             mcp_tool_names,
             structured_instructions,
-            locale=locale,
         ),
         context_schema=RuntimeContext,
         checkpointer=checkpointer or InMemorySaver(),
@@ -326,7 +322,6 @@ def run_cli(
     disable_stream: bool = False,
     structured_model: Optional[Type[BaseModel]] = None,
     structured_suffix: Optional[str] = None,
-    locale: str = "en-US",
     hitl_enabled: bool = False,
     hitl_auto_approve: bool = False,
 ) -> None:
@@ -389,7 +384,7 @@ def run_cli(
                         "identify the customer before querying."
                     )
             if structured_model is None:
-                content = f"{content}\n\n{DEFAULT_RESPONSE_SUFFIX.format(locale=locale)}"
+                content = f"{content}\n\n{DEFAULT_RESPONSE_SUFFIX}"
 
             user_message = HumanMessage(
                 content=content,
@@ -731,11 +726,6 @@ def parse_cli_args() -> argparse.Namespace:
         help="Model identifier passed to init_chat_model (default: %(default)s)",
     )
     parser.add_argument(
-        "--locale",
-        default="en-US",
-        help="Preferred locale/language code (e.g., en-US, fr-FR).",
-    )
-    parser.add_argument(
         "--hitl",
         action="store_true",
         help="Enable human-in-the-loop approvals for SQL tool calls.",
@@ -941,7 +931,6 @@ if __name__ == "__main__":
         mcp_tools=mcp_tools,
         checkpointer=checkpointer,
         structured_instructions=structured_instructions,
-        locale=args.locale,
         hitl_enabled=args.hitl,
     )
 
@@ -955,7 +944,6 @@ if __name__ == "__main__":
         disable_stream=args.no_stream,
         structured_model=structured_model,
         structured_suffix=structured_suffix,
-        locale=args.locale,
         hitl_enabled=args.hitl,
         hitl_auto_approve=args.hitl_auto_approve,
     )
