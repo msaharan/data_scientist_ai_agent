@@ -293,7 +293,7 @@ def build_agent_and_context(
         ),
         context_schema=RuntimeContext,
         checkpointer=checkpointer or InMemorySaver(),
-        middleware=middleware if middleware else None,
+        middleware=middleware,
     )
 
     return agent, runtime_context
