@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import atexit
 import os
-import re
 from datetime import datetime, timezone
 import json
 import pathlib
@@ -16,12 +15,10 @@ from typing import Any, Optional, Tuple, Type
 
 import requests
 from langchain.agents import create_agent
-from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain.chat_models import init_chat_model
 from langchain_community.utilities import SQLDatabase
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command
 
 try:
     from langgraph.checkpoint.sqlite import SqliteSaver
@@ -43,8 +40,6 @@ from .data_scientist_ai_agent_mcp import (
     load_mcp_tools,
 )
 from .data_scientist_ai_agent_tools import (
-    MAX_QUERIES_PER_WINDOW,
-    QUERY_WINDOW_SECONDS,
     RuntimeContext,
     SQL_TOOLS,
 )
@@ -153,48 +148,8 @@ STRUCTURED_PROMPTS = {
 DEFAULT_TONE_PROMPT = "\n- Provide concise answers with clear takeaways."
 DEFAULT_RESPONSE_SUFFIX = "Respond in English with concise, decision-ready phrasing."
 
-AGG_FUNCTION_MARKERS = ("max(", "min(", "count(", "sum(", "avg(", "distinct ")
-
-
-CUSTOMER_IDENTITY_PATTERNS = [
-    re.compile(r"\b(?:this is|ik ben|i am)\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)\b", re.IGNORECASE),
-    re.compile(
-        r"\b(?:same\s+for|for|about|regarding|voor)\s+([A-Z][a-z]+)\s+([A-Z][a-z]+)\b",
-        re.IGNORECASE,
-    ),
-]
-
-
-def extract_customer_identity(text: str) -> Optional[Tuple[str, str]]:
-    for pattern in CUSTOMER_IDENTITY_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            first, last = match.group(1), match.group(2)
-            return first.capitalize(), last.capitalize()
-    return None
-
-
-def is_query_risky(query: str) -> bool:
-    normalized = query.lower()
-    if "sqlite_master" in normalized or "pragma" in normalized:
-        return True
-    if "select *" in normalized:
-        return True
-    has_limit = " limit " in normalized or normalized.rstrip().endswith("limit 1")
-    has_aggregate = any(func in normalized for func in AGG_FUNCTION_MARKERS)
-    if "customer" in normalized:
-        has_first = "firstname" in normalized
-        has_last = "lastname" in normalized
-        if not (has_first and has_last):
-            return True
-    if not has_limit and not has_aggregate:
-        return True
-    return False
-
-
 def build_system_prompt(
     db: SQLDatabase,
-    max_rows: int,
     mcp_summary: Optional[str] = None,
     structured_instructions: Optional[str] = None,
 ) -> str:
@@ -220,13 +175,7 @@ Rules:
 - Use `list_tables` to refresh yourself on the tables that exist.
 - Use `describe_table` to inspect a table's columns before querying it.
 - Read-only only; no INSERT/UPDATE/DELETE/ALTER/DROP/CREATE/REPLACE/TRUNCATE.
-- SQL responses are limited to {max_rows} rows unless the user has explicit authorization.
-- If the tool returns 'Error:', revise the SQL and try again.
-- Limit the number of attempts to 5. 
-- If you are not successful after 5 attempts, return a note to the user.
-- Prefer explicit column lists; avoid SELECT *.
-- If the user identifies themselves (e.g. "This is <First Last>"), ensure every SQL query filters on that customer's first and last name. If you cannot match the name, ask for clarification before answering.
-- Data tools are rate limited to {MAX_QUERIES_PER_WINDOW} queries every {QUERY_WINDOW_SECONDS:.0f} seconds. Consolidate requests when possible.{mcp_lines}{structured_lines}
+- If the tool returns 'Error:', revise the SQL and try again.{mcp_lines}{structured_lines}
 """
 
 
@@ -234,17 +183,15 @@ def build_agent_and_context(
     model_name: str = DEFAULT_MODEL,
     db_path: pathlib.Path = DEFAULT_DB_PATH,
     *,
-    max_rows: int = 5,
     mcp_tools: Optional[list[Any]] = None,
     checkpointer: Optional[Any] = None,
     structured_instructions: Optional[str] = None,
-    hitl_enabled: bool = False,
 ) -> tuple[Any, RuntimeContext]:
     """Construct the SQL agent alongside its runtime context."""
 
     ensure_database(db_path)
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}")
-    runtime_context = RuntimeContext(db=db, max_rows=max_rows)
+    runtime_context = RuntimeContext(db=db)
 
     base_tools = list(SQL_TOOLS)
     mcp_tool_names: Optional[str] = None
@@ -254,28 +201,16 @@ def build_agent_and_context(
             sorted(tool.name for tool in mcp_tools if getattr(tool, "name", None))
         )
 
-    middleware = []
-    if hitl_enabled:
-        middleware.append(
-            HumanInTheLoopMiddleware(
-                interrupt_on={
-                    "execute_sql": {"allowed_decisions": ["approve", "reject"]}
-                }
-            )
-        )
-
     agent = create_agent(
         model=init_chat_model(model_name),
         tools=base_tools,
         system_prompt=build_system_prompt(
             db,
-            max_rows,
             mcp_tool_names,
             structured_instructions,
         ),
         context_schema=RuntimeContext,
         checkpointer=checkpointer or InMemorySaver(),
-        middleware=middleware,
     )
 
     return agent, runtime_context
@@ -322,18 +257,11 @@ def run_cli(
     disable_stream: bool = False,
     structured_model: Optional[Type[BaseModel]] = None,
     structured_suffix: Optional[str] = None,
-    hitl_enabled: bool = False,
-    hitl_auto_approve: bool = False,
 ) -> None:
     """Interactive REPL for the SQL agent."""
 
     config = {"configurable": {"thread_id": thread_id}}
     turn_index = 0
-    active_customer: Optional[Tuple[str, str]] = None
-
-    if hitl_enabled and event_stream:
-        print("[HITL] Event streaming is disabled while human-in-the-loop mode is active.")
-        event_stream = False
 
     print("=" * 60)
     print("SQL Agent with Memory - Interactive Mode")
@@ -356,33 +284,9 @@ def run_cli(
             timestamp = datetime.now(timezone.utc).isoformat()
             header = f"--- Turn {turn_index} | thread={thread_id} | {timestamp} ---"
             print(header)
-            extracted = extract_customer_identity(user_input)
-            if extracted is not None:
-                active_customer = extracted
             content = user_input
             if structured_suffix:
-                content = f"{user_input}\n\n{structured_suffix}"
-            if active_customer is not None:
-                first, last = active_customer
-                customer_instruction = (
-                    "Active customer context: {first} {last}. Every SQL query MUST include "
-                    "filters on Customer.FirstName = '{first}' AND Customer.LastName = '{last}'. "
-                    "If no rows match, ask the user which customer they mean rather than "
-                    "guessing."
-                ).format(first=first, last=last)
-                content = f"{content}\n\n{customer_instruction}"
-            else:
-                if structured_model is not None:
-                    content = (
-                        f"{content}\n\nIf the request does not specify a first and last name, produce JSON with "
-                        "all fields null except `notes`, clarifying that you require the customer's "
-                        "full name before querying."
-                    )
-                else:
-                    content = (
-                        f"{content}\n\nIf the request does not specify a first and last name, ask the user to "
-                        "identify the customer before querying."
-                    )
+                content = f"{content}\n\n{structured_suffix}"
             if structured_model is None:
                 content = f"{content}\n\n{DEFAULT_RESPONSE_SUFFIX}"
 
@@ -398,35 +302,14 @@ def run_cli(
                 logger.log(
                     user_message,
                     direction="outgoing",
-                    step_metadata={
-                        "turn_index": turn_index,
-                        "active_customer": " ".join(active_customer) if active_customer else None,
-                    },
+                    step_metadata={"turn_index": turn_index},
                 )
 
             start = time.perf_counter()
             final_ai_message: Optional[BaseMessage] = None
 
             print()
-            if hitl_enabled:
-                result = agent.invoke(
-                    {"messages": [user_message]},
-                    config=config,
-                    context=runtime_context,
-                )
-                result = resolve_hitl_interrupts(
-                    agent,
-                    result,
-                    config,
-                    runtime_context,
-                    auto_approve=hitl_auto_approve,
-                )
-                messages = result.get("messages", []) if isinstance(result, dict) else []
-                if messages:
-                    final_ai_message = messages[-1]
-                    if structured_model is None:
-                        final_ai_message.pretty_print()
-            elif event_stream:
+            if event_stream:
                 final_ai_message = asyncio.run(
                     _event_stream_interaction(
                         agent,
@@ -460,9 +343,6 @@ def run_cli(
                         step_metadata = {
                             "turn_index": turn_index,
                             "step_type": step.get("type") if isinstance(step, dict) else None,
-                            "active_customer": " ".join(active_customer)
-                            if active_customer
-                            else None,
                         }
                         logger.log(
                             latest_message,
@@ -482,9 +362,6 @@ def run_cli(
                     step_metadata={
                         "turn_index": turn_index,
                         "elapsed_seconds": elapsed,
-                        "active_customer": " ".join(active_customer)
-                        if active_customer
-                        else None,
                     },
                 )
 
@@ -574,110 +451,6 @@ async def _event_stream_interaction(
         final_ai_message.pretty_print()
     return final_ai_message
 
-
-def _get_attr(obj: Any, name: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(name, default)
-    return getattr(obj, name, default)
-
-
-def resolve_hitl_interrupts(
-    agent: Any,
-    result: dict,
-    config: dict[str, Any],
-    runtime_context: RuntimeContext,
-    *,
-    auto_approve: bool,
-) -> dict:
-    while "__interrupt__" in result:
-        interrupt = result["__interrupt__"][-1].value
-        action_requests = _get_attr(interrupt, "action_requests", [])
-        if not isinstance(action_requests, (list, tuple)):
-            action_requests = [action_requests]
-
-        decisions = []
-        tool_calls = _get_attr(interrupt, "tool_calls", [])
-        if isinstance(tool_calls, dict):
-            tool_calls = [tool_calls]
-
-        for idx, request in enumerate(action_requests):
-            description = _get_attr(request, "description", "Approval required")
-            kwargs = _get_attr(request, "kwargs", {}) or _get_attr(request, "args", {}) or {}
-            query = kwargs.get("query") or kwargs.get("sql") or kwargs.get("tool_input")
-            allowed = _get_attr(request, "allowed_decisions", None)
-            call_id = (
-                _get_attr(request, "tool_call_id")
-                or _get_attr(request, "id")
-                or _get_attr(_get_attr(request, "tool_call", {}), "id")
-                or _get_attr(_get_attr(request, "tool_call", {}), "tool_call_id")
-            )
-            if call_id is None and 0 <= idx < len(tool_calls):
-                call_id = (
-                    _get_attr(tool_calls[idx], "id")
-                    or _get_attr(tool_calls[idx], "tool_call_id")
-                )
-            if call_id is None:
-                for tc in tool_calls:
-                    if (
-                        _get_attr(tc, "name") == _get_attr(request, "name")
-                        and _get_attr(tc, "args") == kwargs
-                    ):
-                        call_id = _get_attr(tc, "id") or _get_attr(tc, "tool_call_id")
-                        if call_id:
-                            break
-            if call_id is None:
-                print("[HITL] Warning: tool_call_id missing; raw request:")
-                print(request)
-            allowed_types: list[str] = []
-            if allowed:
-                for entry in allowed:
-                    if isinstance(entry, dict):
-                        allowed_types.append(entry.get("type"))
-                    else:
-                        allowed_types.append(getattr(entry, "type", entry))
-            if not allowed_types:
-                allowed_types = ["approve", "reject"]
-
-            if auto_approve and isinstance(query, str) and not is_query_risky(query):
-                print("[HITL] Auto-approving SQL query:")
-                print(query)
-                decision: dict[str, Any] = {"type": "approve"}
-                if call_id:
-                    decision["tool_call_id"] = call_id
-                decisions.append(decision)
-                continue
-
-            print("-" * 60)
-            print(f"[HITL] Approval required: {description}")
-            if isinstance(query, str):
-                print(f"[HITL] Proposed query:\n{query}")
-            print(f"[HITL] Allowed decisions: {', '.join(allowed_types)}")
-
-            decision: Optional[dict[str, Any]] = None
-            while decision is None:
-                choice = input("[HITL] Enter decision ([a]pprove/[r]eject): ").strip().lower()
-                if choice in {"a", "approve"} and "approve" in allowed_types:
-                    decision = {"type": "approve"}
-                elif choice in {"r", "reject"} and "reject" in allowed_types:
-                    reason = input("[HITL] Optional rejection reason: ").strip()
-                    decision = {"type": "reject", "message": reason or None}
-                else:
-                    print("[HITL] Invalid choice. Please enter 'a' to approve or 'r' to reject.")
-
-                if decision and call_id:
-                    decision["tool_call_id"] = call_id
-
-            decisions.append(decision)
-
-        result = agent.invoke(
-            Command(resume={"decisions": decisions}),
-            config=config,
-            context=runtime_context,
-        )
-
-    return result
-
-
 def load_checkpointer(args: argparse.Namespace) -> Optional[Any]:
     backend = args.memory_backend
     if backend == "memory":
@@ -726,26 +499,10 @@ def parse_cli_args() -> argparse.Namespace:
         help="Model identifier passed to init_chat_model (default: %(default)s)",
     )
     parser.add_argument(
-        "--hitl",
-        action="store_true",
-        help="Enable human-in-the-loop approvals for SQL tool calls.",
-    )
-    parser.add_argument(
-        "--hitl-auto-approve",
-        action="store_true",
-        help="Automatically approve low-risk SQL queries when HITL is enabled.",
-    )
-    parser.add_argument(
         "--db-path",
         type=pathlib.Path,
         default=DEFAULT_DB_PATH,
         help="Path to the Chinook SQLite database (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--max-rows",
-        type=int,
-        default=5,
-        help="Maximum rows permitted in SQL responses (default: %(default)s)",
     )
     parser.add_argument(
         "--enable-mcp-time",
@@ -927,11 +684,9 @@ if __name__ == "__main__":
     agent, runtime_context = build_agent_and_context(
         model_name=args.model,
         db_path=args.db_path,
-        max_rows=args.max_rows,
         mcp_tools=mcp_tools,
         checkpointer=checkpointer,
         structured_instructions=structured_instructions,
-        hitl_enabled=args.hitl,
     )
 
     logger = ConversationLogger(args.log_path) if args.log_path else None
@@ -944,6 +699,4 @@ if __name__ == "__main__":
         disable_stream=args.no_stream,
         structured_model=structured_model,
         structured_suffix=structured_suffix,
-        hitl_enabled=args.hitl,
-        hitl_auto_approve=args.hitl_auto_approve,
     )
