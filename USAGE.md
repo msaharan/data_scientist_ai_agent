@@ -18,10 +18,10 @@ Start with the setup snapshot in `README.md` to install dependencies and configu
 
 ```bash
 # Run with default settings
-uv run python -m src.data_scientist_ai_agent
+uv run python -m src.sql_agent
 
 # Run with custom options
-uv run python -m src.data_scientist_ai_agent --model "openai:gpt-4"
+uv run python -m src.sql_agent --model "openai:gpt-4"
 ```
 
 ### Using Python directly
@@ -31,10 +31,10 @@ uv run python -m src.data_scientist_ai_agent --model "openai:gpt-4"
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Run the agent
-python -m src.data_scientist_ai_agent
+python -m src.sql_agent
 
 # Or with custom options
-python -m src.data_scientist_ai_agent --model "openai:gpt-4"
+python -m src.sql_agent --model "openai:gpt-4"
 ```
 
 ## Command Line Options

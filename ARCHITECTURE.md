@@ -32,12 +32,12 @@ graph TD
 
 ### Tooling
 
-#### SQL toolkit (`src/data_scientist_ai_agent_tools.py`)
+#### SQL toolkit (`src/sql_agent_tools.py`)
 - `execute_sql`: read-only SELECT execution guarded by `_ensure_read_only`.
 - `list_tables`: enumerates database tables.
 - `describe_table`: PRAGMA-based schema inspection.
 
-#### MCP toolkit (`src/data_scientist_ai_agent_mcp.py`)
+#### MCP toolkit (`src/sql_agent_mcp.py`)
 - Loads Model Context Protocol servers defined in configuration files.
 - Wraps async MCP handlers for synchronous use inside the agent.
 - Merges MCP tools with the SQL toolkit when the runtime starts.
@@ -67,7 +67,7 @@ graph TD
 - Register additional Python tools and append them to the SQL toolkit.
 - Provide an MCP configuration file via `--mcp-config` to attach external services.
 - Implement custom middleware (logging, policy enforcement, analytics) and insert it into the LangGraph runtime.
-- Extend structured outputs or adjust the default tone constants in `src/data_scientist_ai_agent.py`.
+- Extend structured outputs or adjust the default tone constants in `src/sql_agent.py`.
 
 ## Security Architecture
 
