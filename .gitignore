@@ -3,6 +3,7 @@
 *.db
 *.csv
 *local/
+*data/*
 *logs/*
 
 # Byte-compiled / optimized / DLL files
