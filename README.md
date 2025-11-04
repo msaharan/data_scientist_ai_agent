@@ -1,6 +1,6 @@
-# Data Scientist AI Agent
+# Data Scientist AI Agents Orchestra
 
-Conversational SQL assistant built with LangGraph that delivers concise, decision-ready answers backed by the Chinook sample database. The agent enforces read-only access and can be extended with Model Context Protocol (MCP) tools.
+Building an orchestra of AI agents to automate data science. Current functionality: conversational SQL assistant built with LangGraph that delivers concise, decision-ready answers backed by the Chinook sample database. The agent enforces read-only access and can be extended with Model Context Protocol (MCP) tools.
 
 ## Highlights
 
