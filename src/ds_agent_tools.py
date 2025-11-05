@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 from langchain_core.tools import tool
@@ -20,6 +23,30 @@ MAX_MERGE_PREVIEW_ROWS = 20
 
 _VALID_JOIN_TYPES = {"inner", "left", "right", "outer", "cross"}
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOG_DIR = PROJECT_ROOT / "logs"
+LOG_FILE = LOG_DIR / "ds_agent.log"
+LOGGER_NAME = "ds_agent.tools"
+
+
+def _configure_logger() -> logging.Logger:
+    logger = logging.getLogger(LOGGER_NAME)
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(logging.INFO)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    )
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+
+LOGGER = _configure_logger()
+
 
 @dataclass
 class DataScienceContext:
@@ -32,15 +59,38 @@ class DataScienceContext:
         if limit is not None:
             overrides = {"nrows": limit}
 
+        source = self.catalog.get(name)
+        load_strategy = "default"
+        start = time.perf_counter()
         try:
             frame = self.catalog.load(name, overrides=overrides)
         except TypeError as exc:
             if limit is None or "nrows" not in str(exc):
+                LOGGER.exception(
+                    "dataset_load_failed dataset=%s limit=%s", name, limit
+                )
                 raise
+            LOGGER.warning(
+                "dataset_load_retry dataset=%s limit=%s reason=%s", name, limit, exc
+            )
+            load_strategy = "fallback_without_limit"
             frame = self.catalog.load(name)
+        duration = time.perf_counter() - start
 
         if limit is not None:
             frame = frame.head(limit)
+
+        rows, columns = getattr(frame, "shape", (None, None))
+        LOGGER.info(
+            "dataset_load dataset=%s format=%s strategy=%s limit=%s rows=%s columns=%s duration=%.3f",
+            name,
+            source.format.value if source.format else "auto",
+            load_strategy,
+            limit if limit is not None else "None",
+            rows,
+            columns,
+            duration,
+        )
         return frame
 
 
@@ -70,6 +120,9 @@ def list_datasets(verbose: bool = False) -> str:
         if verbose and entry.description:
             summary += f": {entry.description}"
         lines.append(summary)
+    LOGGER.info(
+        "tool=list_datasets verbose=%s dataset_count=%s", verbose, len(lines)
+    )
     return "\n".join(lines) if lines else "No datasets registered in the catalog."
 
 
@@ -82,6 +135,13 @@ def preview_dataset(dataset_name: str, limit: int = 5) -> str:
     frame = context.load_dataset(dataset_name, limit=limit)
     preview = frame.head(limit).to_string(index=False)
     shape_info = f"rows={frame.shape[0]}, columns={frame.shape[1]}"
+    LOGGER.info(
+        "tool=preview_dataset dataset=%s limit=%s rows=%s columns=%s",
+        dataset_name,
+        limit,
+        frame.shape[0],
+        frame.shape[1],
+    )
     return f"Dataset: {dataset_name}\nShape: {shape_info}\nSample (limit={limit}):\n{preview}"
 
 
@@ -91,7 +151,16 @@ def profile_dataset_tool(dataset_name: str, sample_size: int = 5) -> str:
 
     context = _get_context()
     config = ProfileConfig(sample_size=sample_size)
+    start = time.perf_counter()
     profile = profile_dataset(context.catalog.get(dataset_name), config=config)
+    duration = time.perf_counter() - start
+    LOGGER.info(
+        "tool=profile_dataset dataset=%s columns=%s sample_size=%s duration=%.3f",
+        dataset_name,
+        len(profile.columns),
+        sample_size,
+        duration,
+    )
     return json.dumps(profile.to_dict(), indent=2)
 
 
@@ -137,6 +206,13 @@ def analyze_dataset(dataset_name: str, objective: str = "summary") -> str:
         )
 
     heading = f"Analysis summary for '{dataset_name}' (objective='{objective}')"
+    LOGGER.info(
+        "tool=analyze_dataset dataset=%s objective=%s rows=%s columns=%s",
+        dataset_name,
+        objective,
+        frame.shape[0],
+        frame.shape[1],
+    )
     return heading + "\n\n" + "\n\n".join(results)
 
 
@@ -150,6 +226,11 @@ def list_task_templates(include_tips: bool = False) -> str:
         if not include_tips:
             payload.pop("tips", None)
         catalog_payload.append(payload)
+    LOGGER.info(
+        "tool=list_task_templates include_tips=%s template_count=%s",
+        include_tips,
+        len(catalog_payload),
+    )
     return json.dumps({"templates": catalog_payload}, indent=2)
 
 
@@ -161,6 +242,11 @@ def task_template_details(task_type: str, include_tips: bool = True) -> str:
         template = get_task_template(task_type)
     except KeyError:
         choices = ", ".join(available_task_types())
+        LOGGER.warning(
+            "tool=task_template_details_unknown task_type=%s choices=%s",
+            task_type,
+            choices,
+        )
         return (
             f"Unknown task template '{task_type}'. "
             f"Available templates: {choices}."
@@ -168,6 +254,11 @@ def task_template_details(task_type: str, include_tips: bool = True) -> str:
     payload: Mapping[str, Any] = template.to_dict()
     if not include_tips:
         payload = {k: v for k, v in payload.items() if k != "tips"}
+    LOGGER.info(
+        "tool=task_template_details task_type=%s include_tips=%s",
+        task_type,
+        include_tips,
+    )
     return json.dumps(payload, indent=2)
 
 
@@ -188,17 +279,36 @@ def merge_datasets(
     join_type = how.lower()
     if join_type not in _VALID_JOIN_TYPES:
         options = ", ".join(sorted(_VALID_JOIN_TYPES))
+        LOGGER.warning(
+            "tool=merge_datasets_invalid_join left=%s right=%s how=%s options=%s",
+            left_dataset,
+            right_dataset,
+            how,
+            options,
+        )
         return f"Unsupported join type '{how}'. Choose from: {options}."
 
     try:
         left_keys = _normalise_join_columns(left_on)
     except ValueError as exc:
+        LOGGER.warning(
+            "tool=merge_datasets_invalid_left_keys dataset=%s left_on=%s error=%s",
+            left_dataset,
+            left_on,
+            exc,
+        )
         return f"Invalid left join keys: {exc}"
 
     right_key_arg = right_on if right_on is not None else left_on
     try:
         right_keys = _normalise_join_columns(right_key_arg)
     except ValueError as exc:
+        LOGGER.warning(
+            "tool=merge_datasets_invalid_right_keys dataset=%s right_on=%s error=%s",
+            right_dataset,
+            right_key_arg,
+            exc,
+        )
         return f"Invalid right join keys: {exc}"
 
     left_frame = context.load_dataset(left_dataset, limit=MAX_ANALYSIS_ROWS)
@@ -207,6 +317,11 @@ def merge_datasets(
     missing_left = [column for column in left_keys if column not in left_frame.columns]
     if missing_left:
         missing = ", ".join(missing_left)
+        LOGGER.warning(
+            "tool=merge_datasets_missing_left_columns dataset=%s missing=%s",
+            left_dataset,
+            missing,
+        )
         return (
             f"Columns not found in left dataset '{left_dataset}': {missing}."
             " Verify the join keys."
@@ -215,6 +330,11 @@ def merge_datasets(
     missing_right = [column for column in right_keys if column not in right_frame.columns]
     if missing_right:
         missing = ", ".join(missing_right)
+        LOGGER.warning(
+            "tool=merge_datasets_missing_right_columns dataset=%s missing=%s",
+            right_dataset,
+            missing,
+        )
         return (
             f"Columns not found in right dataset '{right_dataset}': {missing}."
             " Verify the join keys."
@@ -242,6 +362,13 @@ def merge_datasets(
             suffixes=("_left", "_right"),
         )
     except Exception as exc:  # pragma: no cover - defensive fallback
+        LOGGER.exception(
+            "tool=merge_datasets_failure left=%s right=%s how=%s error=%s",
+            left_dataset,
+            right_dataset,
+            join_type,
+            exc,
+        )
         return f"Failed to merge datasets: {exc}"
 
     preview_limit = max(1, min(limit, MAX_MERGE_PREVIEW_ROWS))
@@ -254,6 +381,18 @@ def merge_datasets(
         f"Join type: {join_type}",
         f"Join keys: left={left_keys}, right={right_keys}",
     ]
+
+    LOGGER.info(
+        "tool=merge_datasets left=%s right=%s how=%s left_keys=%s right_keys=%s rows=%s columns=%s preview_limit=%s",
+        left_dataset,
+        right_dataset,
+        join_type,
+        left_keys,
+        right_keys,
+        merged.shape[0],
+        merged.shape[1],
+        preview_limit,
+    )
 
     return (
         "\n".join(metadata_lines)
