@@ -1,7 +1,10 @@
 """Dataset abstractions and loader registry for tabular sources."""
 
+from __future__ import annotations
+
+from typing import Any
+
 from .base import DataSource, load_dataset
-from .catalog import DatasetCatalog, load_catalog
 from .loaders import (
     DataFormat,
     DatasetLoader,
@@ -21,4 +24,20 @@ __all__ = [
     "load_catalog",
     "register_loader",
 ]
+
+_LAZY_ATTRS = {"DatasetCatalog", "load_catalog"}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_ATTRS:
+        from .catalog import DatasetCatalog, load_catalog
+
+        globals().update(
+            {
+                "DatasetCatalog": DatasetCatalog,
+                "load_catalog": load_catalog,
+            }
+        )
+        return globals()[name]
+    raise AttributeError(f"module 'src.datasets' has no attribute '{name}'")
 
