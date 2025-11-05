@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from textwrap import shorten
 from typing import Any, Mapping
 
 from langchain_core.tools import tool
@@ -12,6 +11,7 @@ from langgraph.runtime import get_runtime
 
 from .datasets import DatasetCatalog
 from .data_prep import ProfileConfig, profile_dataset
+from .ds_agent_templates import available_task_types, get_task_template, template_catalog
 
 
 MAX_PREVIEW_ROWS = 100
@@ -119,11 +119,44 @@ def analyze_dataset(dataset_name: str, objective: str = "summary") -> str:
     return heading + "\n\n" + "\n\n".join(results)
 
 
+@tool
+def list_task_templates(include_tips: bool = False) -> str:
+    """Return the catalog of predefined analytical task templates in JSON form."""
+
+    catalog_payload: list[Mapping[str, Any]] = []
+    for entry in template_catalog():
+        payload = dict(entry)
+        if not include_tips:
+            payload.pop("tips", None)
+        catalog_payload.append(payload)
+    return json.dumps({"templates": catalog_payload}, indent=2)
+
+
+@tool
+def task_template_details(task_type: str, include_tips: bool = True) -> str:
+    """Fetch a specific task template, returning structured guidance for the agent."""
+
+    try:
+        template = get_task_template(task_type)
+    except KeyError:
+        choices = ", ".join(available_task_types())
+        return (
+            f"Unknown task template '{task_type}'. "
+            f"Available templates: {choices}."
+        )
+    payload: Mapping[str, Any] = template.to_dict()
+    if not include_tips:
+        payload = {k: v for k, v in payload.items() if k != "tips"}
+    return json.dumps(payload, indent=2)
+
+
 DATA_SCIENCE_TOOLS = [
     list_datasets,
     preview_dataset,
     profile_dataset_tool,
     analyze_dataset,
+    list_task_templates,
+    task_template_details,
 ]
 
 
@@ -132,7 +165,9 @@ __all__ = [
     "DATA_SCIENCE_TOOLS",
     "analyze_dataset",
     "list_datasets",
+    "list_task_templates",
     "profile_dataset_tool",
     "preview_dataset",
+    "task_template_details",
 ]
 

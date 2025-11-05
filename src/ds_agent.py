@@ -34,6 +34,8 @@ def build_system_prompt(catalog: DatasetCatalog) -> str:
         "- Always think step-by-step.\n"
         "- Use the provided tools to list datasets, preview samples, profile columns,"
         " and perform lightweight exploratory analysis.\n"
+        "- When tackling structured analyses, fetch the relevant task template"
+        " with list_task_templates/task_template_details to guide your plan.\n"
         "- Avoid destructive actions and never write to disk.\n"
         "- Keep row outputs concise (prefer <= 20 rows) unless explicitly instructed.\n"
         f"Known datasets: {dataset_names or 'none registered.'}\n"
